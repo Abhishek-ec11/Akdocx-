@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AKdocx - Secure Document Cloud</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* Custom styles for Inter font and general typography */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .prose p { margin-bottom: 1em; }
+        .prose ul { padding-left: 1.5em; list-style-type: disc; }
+        .prose li { margin-bottom: 0.5em; }
+        /* Animation utility */
+        @keyframes pulse-fade {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
+        }
+        .animate-custom-pulse {
+            animation: pulse-fade 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useMemo } = React;
+        const { LogOut, Home, Key, User, File, Upload, Lock, Unlock, CheckCircle, XCircle, Trash2, Edit, Download, Settings, Users, DollarSign, Menu, X, Copy, Clock, Info, FileText, Image, FileArchive, FileType2, FileAudio, FileVideo, FileCode, Save } = lucide;
+
+        // --- UTILITIES ---
+        
+        // Robust ID generation with fallback for environments where crypto.randomUUID() might not be available
+        const generateId = () => {
+            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+                return crypto.randomUUID();
+            }
+            // Fallback: simple timestamp + random number
+            return 'mock-' + Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
+        };
+
+        const formatBytes = (bytes) => {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        };
+
+        // Helper function to display temporary message instead of alert()
+        const showMessage = (text, type = 'success') => {
+            const messageBox = document.createElement('div');
+            messageBox.textContent = text;
+            messageBox.className = `fixed bottom-5 right-5 z-[100] px-4 py-3 rounded-lg shadow-xl text-sm font-semibold transition-all duration-300 transform translate-y-full opacity-0 ${
+                type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+            }`;
+            document.body.appendChild(messageBox);
+            // Animate in
+            setTimeout(() => {
+                messageBox.style.opacity = '1';
+                messageBox.style.transform = 'translateY(0)';
+            }, 10);
+            // Animate out
+            setTimeout(() => {
+                messageBox.style.opacity = '0';
+                messageBox.style.transform = 'translateY(100%)';
+                messageBox.addEventListener('transitionend', () => messageBox.remove());
+            }, 3000);
+        };
+
+        // Helper function for file icons
+        const getFileIcon = (mimeType) => {
+            const type = mimeType.toLowerCase();
+            let Icon = FileText;
+            let color = 'text-gray-500';
+
+            if (type.includes('pdf')) { Icon = File; color = 'text-red-600'; }
+            else if (type.includes('image')) { Icon = Image; color = 'text-yellow-600'; }
+            else if (type.includes('word') || type.includes('doc')) { Icon = FileType2; color = 'text-blue-600'; }
+            else if (type.includes('sheet') || type.includes('excel') || type.includes('csv')) { Icon = FileArchive; color = 'text-green-600'; }
+            else if (type.includes('zip') || type.includes('rar')) { Icon = FileArchive; color = 'text-purple-600'; }
+            else if (type.includes('code') || type.includes('javascript') || type.includes('json') || type.includes('html')) { Icon = FileCode; color = 'text-indigo-600'; }
+            else if (type.includes('audio')) { Icon = FileAudio; color = 'text-teal-600'; }
+            else if (type.includes('video')) { Icon = FileVideo; color = 'text-pink-600'; }
+
+            return { Icon, color };
+        };
+        
+        // --- MOCK BACKEND / STATE MANAGEMENT ---
+
+        const MOCK_STORAGE_KEY = 'akdocx_mock_users';
+
+        // Initial data structure for new deployments or if localStorage is empty
+        const initialUsers = [
+            {
+                id: 'admin123',
+                username: 'admin@akdocx.com',
+                passwordHash: 'hashed_admin_password',
+                role: 'admin',
+                paymentStatus: 'approved',
+                paymentProofUrl: null,
+                rejectionReason: null,
+                files: [
+                    { id: 'f1', name: 'SetupGuide.pdf', size: 125000, date: '2024-09-01', privacy: 'public', type: 'application/pdf' },
+                    { id: 'f2', name: 'PolicyDraft.docx', size: 55000, date: '2024-09-05', privacy: 'private', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+                ]
+            },
+            {
+                id: 'user456',
+                username: 'newuser@test.com',
+                passwordHash: 'hashed_user_password',
+                role: 'user',
+                paymentStatus: 'pending',
+                paymentProofUrl: 'https://placehold.co/300x200/4F46E5/ffffff?text=Payment+Screenshot',
+                rejectionReason: null,
+                files: []
+            },
+            {
+                id: 'user789',
+                username: 'active@test.com',
+                passwordHash: 'hashed_active_password',
+                role: 'user',
+                paymentStatus: 'approved',
+                paymentProofUrl: 'https://placehold.co/300x200/10B981/ffffff?text=Approved+Proof',
+                rejectionReason: null,
+                files: [
+                    { id: 'f3', name: 'VacationPlan.jpg', size: 300000, date: '2024-09-10', privacy: 'private', type: 'image/jpeg' },
+                ]
+            },
+            {
+                id: 'user001',
+                username: 'rejected@test.com',
+                passwordHash: 'hashed_rejected_password',
+                role: 'user',
+                paymentStatus: 'rejected',
+                rejectionReason: 'The uploaded image was blurry and the transaction ID was missing. Please ensure the UTR number is clearly visible.',
+                paymentProofUrl: 'https://placehold.co/300x200/FF0000/ffffff?text=Rejected+Proof',
+                files: []
+            },
+        ];
+
+        // Function to safely get users from localStorage or return default
+        const getInitialUsers = () => {
+            let users = initialUsers;
+            try {
+                const storedUsers = localStorage.getItem(MOCK_STORAGE_KEY);
+                if (storedUsers) {
+                    users = JSON.parse(storedUsers);
+                }
+            } catch (e) {
+                console.error("Could not read or parse users from localStorage, using default data.", e);
+            }
+            
+            // Set up default state and save for persistence if it didn't exist
+            if (!localStorage.getItem(MOCK_STORAGE_KEY)) {
+                localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(initialUsers));
+            }
+            return users;
+        };
+
+        // Function to update localStorage
+        const saveUsersToStorage = (users) => {
+            try {
+                localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(users));
+            } catch (e) {
+                console.error("Could not save to localStorage.", e);
+            }
+        };
+
+        const useMockAuth = () => {
+            // Initialize users state from localStorage or default list
+            const [users, setUsers] = useState(getInitialUsers);
+
+            // Find the current user based on persistent ID or default (admin@akdocx.com)
+            const [currentUser, setCurrentUser] = useState(() => {
+                const allUsers = getInitialUsers();
+                try {
+                    const storedId = localStorage.getItem('akdocx_current_user_id');
+                    const initialUser = allUsers.find(u => u.id === storedId) ||
+                                         allUsers.find(u => u.username === 'admin@akdocx.com') ||
+                                         null;
+                    return initialUser;
+                } catch (e) {
+                    console.error("Failed to retrieve current user ID from storage.", e);
+                    return allUsers.find(u => u.username === 'admin@akdocx.com') || null;
+                }
+            });
+
+            const [isLoading, setIsLoading] = useState(false);
+            const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+            // Determine initial page based on auth and payment status
+            const [page, setPage] = useState(() => {
+                if (currentUser) {
+                    if (currentUser.role === 'admin') return 'admin';
+                    if (currentUser.paymentStatus !== 'approved') return 'payment';
+                    return 'dashboard';
+                }
+                return 'home';
+            });
+
+            // Effect to update localStorage whenever users or currentUser changes
+            useEffect(() => {
+                saveUsersToStorage(users);
+                if (currentUser) {
+                    localStorage.setItem('akdocx_current_user_id', currentUser.id);
+                } else {
+                    localStorage.removeItem('akdocx_current_user_id');
+                }
+            }, [users, currentUser]);
+
+            // Update User state
+            const updateUser = useCallback((updatedUser) => {
+                setUsers(prevUsers => {
+                    const newUsers = prevUsers.map(u => u.id === updatedUser.id ? updatedUser : u);
+                    return newUsers;
+                });
+                setCurrentUser(prevUser => prevUser && prevUser.id === updatedUser.id ? updatedUser : prevUser);
+            }, []);
+
+            // Login Simulation
+            const login = async (username, password) => {
+                setIsLoading(true);
+                await new Promise(resolve => setTimeout(resolve, 500)); // Simulate network latency
+
+                const user = users.find(u => u.username === username);
+                if (user && user.passwordHash === `hashed_${user.role === 'admin' ? 'admin' : 'user'}_password`) { // Check hash based on role
+                    setCurrentUser(user);
+                    setPage(user.role === 'admin' ? 'admin' : (user.paymentStatus !== 'approved' ? 'payment' : 'dashboard'));
+                    setIsLoading(false);
+                    return { success: true, user };
+                }
+                setIsLoading(false);
+                return { success: false, message: 'Invalid credentials.' };
+            };
+
+            // Register Simulation
+            const register = async (username, password) => {
+                setIsLoading(true);
+                await new Promise(resolve => setTimeout(resolve, 500)); // Simulate network latency
+
+                if (users.find(u => u.username === username)) {
+                    setIsLoading(false);
+                    return { success: false, message: 'User already exists.' };
+                }
+                const newUser = {
+                    id: generateId(), 
+                    username,
+                    passwordHash: `hashed_user_password`,
+                    role: 'user',
+                    paymentStatus: 'unpaid',
+                    paymentProofUrl: null,
+                    rejectionReason: null,
+                    files: [],
+                };
+                setUsers(prevUsers => [...prevUsers, newUser]);
+                setCurrentUser(newUser);
+                setPage('payment');
+                setIsLoading(false);
+                return { success: true };
+            };
+
+            // Logout
+            const logout = () => {
+                setCurrentUser(null);
+                setPage('home');
+                setIsSidebarOpen(false);
+            };
+
+            return {
+                isAuthenticated: !!currentUser,
+                currentUser,
+                users,
+                page,
+                setPage,
+                login,
+                register,
+                logout,
+                updateUser,
+                isLoading,
+                setIsLoading,
+                isSidebarOpen,
+                setIsSidebarOpen
+            };
+        };
+
+        // --- COMPONENTS ---
+
+        const GlobalLoadingSpinner = ({ isLoading }) => {
+            if (!isLoading) return null;
+            return (
+                <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-[1000] backdrop-blur-sm">
+                    <div className="flex flex-col items-center bg-white p-6 rounded-xl shadow-2xl">
+                        <svg className="animate-spin h-10 w-10 text-indigo-600 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <p className="font-semibold text-gray-700">Processing request securely...</p>
+                    </div>
+                </div>
+            );
+        };
+        
+        // Reusable UI Components
+        const Button = ({ children, className = '', variant = 'primary', ...props }) => {
+            const baseStyle = 'px-4 py-2 font-semibold rounded-lg transition duration-150 ease-in-out flex items-center justify-center space-x-2';
+            let variantStyle = '';
+            switch (variant) {
+                case 'primary':
+                    variantStyle = 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md hover:shadow-lg disabled:bg-indigo-400';
+                    break;
+                case 'secondary':
+                    variantStyle = 'bg-gray-100 hover:bg-gray-200 text-gray-800 shadow-sm border border-gray-300 disabled:bg-gray-50';
+                    break;
+                case 'danger':
+                    variantStyle = 'bg-red-600 hover:bg-red-700 text-white shadow-md disabled:bg-red-400';
+                    break;
+                case 'success':
+                    variantStyle = 'bg-green-600 hover:bg-green-700 text-white shadow-md disabled:bg-green-400';
+                    break;
+                case 'link':
+                    variantStyle = 'text-indigo-600 hover:text-indigo-800 underline';
+                    break;
+                default:
+                    variantStyle = 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md';
+            }
+            return (
+                <button className={`${baseStyle} ${variantStyle} ${className}`} {...props}>
+                    {children}
+                </button>
+            );
+        };
+
+        const Input = ({ label, type = 'text', className = '', ...props }) => (
+            <div className="flex flex-col space-y-1 w-full">
+                {label && <label className="text-sm font-medium text-gray-700">{label}</label>}
+                <input
+                    type={type}
+                    className={`p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 ${className}`}
+                    {...props}
+                />
+            </div>
+        );
+
+        const Card = ({ title, children, className = '' }) => (
+            <div className={`bg-white p-6 shadow-2xl rounded-xl ${className}`}>
+                {title && <h2 className="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">{title}</h2>}
+                {children}
+            </div>
+        );
+
+        // Payment Status Banner Component
+        const PaymentStatusBanner = ({ currentUser }) => {
+            const statusMap = {
+                'unpaid': { color: 'text-red-600', bg: 'bg-red-100', borderColor: 'border-red-600', text: 'Account Inactive - Payment Required', icon: XCircle,
+                    message: 'A one-time fee of ₹29 is required for permanent access to all features.' },
+                'pending': { color: 'text-blue-600', bg: 'bg-blue-100', borderColor: 'border-blue-600', text: 'Review Pending', icon: Clock,
+                    message: 'We are currently reviewing your submitted proof. This usually takes 1-2 hours.' },
+                'approved': { color: 'text-green-600', bg: 'bg-green-100', borderColor: 'border-green-600', text: 'Payment Verified - Access Granted', icon: CheckCircle,
+                    message: 'Your payment is approved, enjoy full access to AKdocx.' },
+                'rejected': { color: 'text-red-600', bg: 'bg-red-100', borderColor: 'border-red-600', text: 'Payment Rejected - Action Required', icon: XCircle,
+                    message: 'The previous submission was rejected. Please review the reason below and submit new proof.' },
+            };
+
+            const currentStatus = statusMap[currentUser.paymentStatus];
+
+            return (
+                <div className={`flex items-start space-x-4 p-4 rounded-xl ${currentStatus.bg} border-l-4 ${currentStatus.borderColor} shadow-lg`}>
+                    {currentStatus.icon && <currentStatus.icon className={`w-7 h-7 flex-shrink-0 mt-1 ${currentStatus.color}`} />}
+                    <div>
+                        <p className={`text-xl font-bold ${currentStatus.color}`}>{currentStatus.text}</p>
+                        <p className="text-sm text-gray-700 mt-1">{currentStatus.message}</p>
+                    </div>
+                </div>
+            );
+        };
+
+        // Reusable Modal Component
+        const Modal = ({ title, children, onClose, className = '' }) => (
+            <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
+                <Card className={`w-full max-w-lg relative animate-in zoom-in-50 duration-200 ${className}`}>
+                    <h3 className="text-xl font-bold mb-4">{title}</h3>
+                    <button onClick={onClose} className="absolute top-4 right-4 text-gray-500 hover:text-gray-800 transition">
+                        <X className="w-6 h-6" />
+                    </button>
+                    <div className="mt-4">{children}</div>
+                </Card>
+            </div>
+        );
+
+        // File Details Modal Component
+        const FileDetailsModal = ({ file, onClose, formatBytes, handleFileAction }) => {
+
+            // Combined Renaming and Privacy Control Logic
+            const [newName, setNewName] = useState(file.name);
+            const [isPrivate, setIsPrivate] = useState(file.privacy === 'private');
+
+            const handleSave = (e) => {
+                e.preventDefault();
+                const newPrivacy = isPrivate ? 'private' : 'public';
+
+                // 1. Rename logic
+                if (newName.trim() !== file.name) {
+                    handleFileAction(file.id, 'rename', newName.trim());
+                }
+
+                // 2. Privacy logic
+                if (newPrivacy !== file.privacy) {
+                    handleFileAction(file.id, 'privacy', newPrivacy);
+                }
+
+               
